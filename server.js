@@ -3,7 +3,10 @@ const http = require('http');
 const path = require('path');
 
 const PORT = process.env.PORT || 3001;
-const DATA_DIR = path.join(__dirname, 'data');
+const HOST = process.env.HOST || '0.0.0.0';
+const PUBLIC_ORIGIN = process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_URL || '';
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const DIST_DIR = path.join(__dirname, 'dist');
 const DIST_INDEX_FILE = path.join(DIST_DIR, 'index.html');
@@ -114,6 +117,14 @@ const sendJson = (res, statusCode, payload) => {
   res.end(JSON.stringify(payload));
 };
 
+const resolvePublicUrl = (pathname) => {
+  if (PUBLIC_ORIGIN) {
+    return new URL(pathname, PUBLIC_ORIGIN).toString();
+  }
+
+  return pathname;
+};
+
 const getContentType = (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
 
@@ -163,6 +174,10 @@ const serveFrontend = (req, res) => {
 const ensureStorage = () => {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
 
   if (!fs.existsSync(STATE_FILE)) {
@@ -352,25 +367,18 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 200, {
       app: 'Character Archive Backend',
       version: '1.1.0',
-      storage: STATE_FILE
+      storage: STATE_FILE,
+      uploads: UPLOADS_DIR
     });
     return;
   }
 
-  if (req.url.startsWith('/src/assets/') && req.method === 'GET') {
+  if (req.url.startsWith('/uploads/') && req.method === 'GET') {
     try {
       const filename = path.basename(req.url);
-      const filePath = path.join(__dirname, '../Frontend/src/assets', filename);
+      const filePath = path.join(UPLOADS_DIR, filename);
       if (fs.existsSync(filePath)) {
-        const ext = path.extname(filename).toLowerCase();
-        let contentType = 'application/octet-stream';
-        if (ext === '.webp') contentType = 'image/webp';
-        else if (ext === '.png') contentType = 'image/png';
-        else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
-        else if (ext === '.gif') contentType = 'image/gif';
-        
-        res.setHeader('Content-Type', contentType);
-        fs.createReadStream(filePath).pipe(res);
+        serveFile(res, filePath);
         return;
       }
     } catch (e) {
@@ -396,13 +404,7 @@ const server = http.createServer(async (req, res) => {
       const timestamp = Date.now();
       const randomStr = Math.random().toString(36).substring(2, 8);
       const outputFilename = `${timestamp}-${randomStr}.webp`;
-      const assetsDir = path.join(__dirname, '../Frontend/src/assets');
-
-      if (!fs.existsSync(assetsDir)) {
-        fs.mkdirSync(assetsDir, { recursive: true });
-      }
-
-      const outputPath = path.join(assetsDir, outputFilename);
+      const outputPath = path.join(UPLOADS_DIR, outputFilename);
 
       const sharp = require('sharp');
       await sharp(buffer)
@@ -411,7 +413,7 @@ const server = http.createServer(async (req, res) => {
 
       sendJson(res, 200, {
         status: 'ok',
-        url: `/src/assets/${outputFilename}`
+        url: resolvePublicUrl(`/uploads/${outputFilename}`)
       });
       return;
     } catch (error) {
@@ -469,5 +471,5 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   ensureStorage();
-  console.log(`Backend server running on http://localhost:${PORT}`);
+  console.log(`Backend server running on http://${HOST}:${PORT}`);
 });
