@@ -5,6 +5,8 @@ const path = require('path');
 const PORT = process.env.PORT || 3001;
 const DATA_DIR = path.join(__dirname, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
+const DIST_DIR = path.join(__dirname, 'dist');
+const DIST_INDEX_FILE = path.join(DIST_DIR, 'index.html');
 const MAX_BODY_SIZE = 50 * 1024 * 1024;
 const ALLOWED_PAGES = new Set(['home', 'characters', 'detail', 'logs', 'admin', 'my-intro', 'world-intro']);
 const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -110,6 +112,52 @@ const sendJson = (res, statusCode, payload) => {
     'Access-Control-Allow-Headers': 'Content-Type'
   });
   res.end(JSON.stringify(payload));
+};
+
+const getContentType = (filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'application/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.ico') return 'image/x-icon';
+  return 'application/octet-stream';
+};
+
+const serveFile = (res, filePath) => {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return false;
+  }
+
+  res.writeHead(200, {
+    'Content-Type': getContentType(filePath),
+    'Access-Control-Allow-Origin': '*'
+  });
+
+  fs.createReadStream(filePath).pipe(res);
+  return true;
+};
+
+const serveFrontend = (req, res) => {
+  if (req.method !== 'GET') return false;
+
+  const requestPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  if (requestPath.startsWith('/api/')) return false;
+
+  const targetPath = requestPath === '/' ? DIST_INDEX_FILE : path.resolve(DIST_DIR, `.${requestPath}`);
+  const isInsideDist = path.relative(DIST_DIR, targetPath).split(path.sep)[0] !== '..';
+
+  if (isInsideDist && serveFile(res, targetPath)) {
+    return true;
+  }
+
+  return serveFile(res, DIST_INDEX_FILE);
 };
 
 const ensureStorage = () => {
@@ -284,6 +332,10 @@ const server = http.createServer(async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type'
     });
     res.end();
+    return;
+  }
+
+  if (serveFrontend(req, res)) {
     return;
   }
 
